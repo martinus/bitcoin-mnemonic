@@ -358,7 +358,10 @@ require 'digest/sha1'
 class ShamirSecretSharing
 	def self.pack(shares); shares; end
 	def self.unpack(shares); shares; end
-	def self.encode(string); string; end
+	
+	def self.encode(id, checksum0, checksum1, yHex); 
+		[((id << 1) | (checksum0 & 1)), checksum1, yHex].pack("CCH*")
+	end
 	def self.decode(string); string; end
 
 	def self.smallest_prime_of_bytelength(bytelength)
@@ -423,48 +426,52 @@ class ShamirSecretSharing
 		def self.pack(shares, needed)
 			available = shares.size
 			shares.map{|x,num_bytes,y|
-				nr = x.to_s.to_i
-				puts "#{needed} of #{available}, share #{nr}"
 				# 4 bit: version (currently 0)
-				# 9 bit checksum (1/512. Calculated on whole data, where checkusm is set to 0.
 				# 3 bit: n-of-m up to 3of3, with share.
+				# 9 bit checksum (1/512. Calculated on whole data, where checkusm is set to 0.
 				# == 16bit overhead.
-				buf = [ x, num_bytes, y.to_s(16) ].pack("CnH*")
-				checksum = Digest::SHA512.digest(buf)[0...2]
-				encode(checksum << buf)
+				nr = x.to_s.to_i
+				id, _ = find_id_or_nmx([needed, available, nr])
+				yHex = y.to_s(16).rjust(num_bytes*2, '0')
+				buf = encode(id, 0, 0, yHex)
+				checksum = Digest::SHA512.digest(buf)[0...2].unpack("C*")
 				
-				#y.to_s(16).pack("H*")
+				# interleave with checksum
+				blob = encode(id, checksum[0], checksum[1], yHex)
+				to_text(blob)
 			}
 		end
 		def self.unpack(shares)
 			shares.map{|i|
-				buf = decode(i) rescue nil
-				raise ShareDecodeError, "share: #{i}" unless buf
-				checksum, buf = buf.unpack("a2a*")
-				raise ShareChecksumError, "share: #{i}" unless checksum == Digest::SHA512.digest(buf)[0...2]
-				i = buf.unpack("CnH*"); [ i[0], i[1], i[2].to_i(16) ]
+				blob = from_text(i)
+				# first, make sure checksum is ok.
+				a, b, yHex = blob.unpack("CCH*")
+				id = (a >> 1) & 0x7 # only 3 bits for id
+				buf = encode(id, 0, 0, yHex)
+				checksum = Digest::SHA512.digest(buf)[0...2].unpack("C*")
+				# interleave with checksum
+				buf = encode(id, checksum[0], checksum[1], yHex)
+				raise ShareChecksumError, "share: #{i}" unless buf == blob
+
+				id, n, m, x = find_id_or_nmx(id)
+
+				[x, yHex.size/2, yHex.to_i(16)]
 			}
 		end
-	end
-
-	class NonPacked < Packed
-		def self.encode(string); string; end
-		def self.decode(string); string; end
 	end
 end
 
 
 # converts an ID to n-of-m and nr. of the share.
-def find_id_or_nmx(id_or_nmx, max_m=3)
-	find_id = !id_or_nmx.is_a?(Enumerable)
-	
-	return [0, 1, 1, 1] if (find_id ? id_or_nmx == 0 : is_a == [1,1,1])
+def find_id_or_nmx(id_or_nmx, max_m=30)
+	return [0, 1, 1, 1] if id_or_nmx == 0 || id_or_nmx == [1,1,1]
 	
 	id = 0
 	max_m.times do |m|
 		m.times do |n|
 			(m+1).times do |nr|
-				return [id, n+2, m+1, nr+1] if (find_id ? is_a == id : is_a == [n+2, m+1, nr+1])
+				nmx = [n+2, m+1, nr+1]
+				return [id] + nmx if id_or_nmx == id || id_or_nmx == nmx
 				id += 1
 			end
 		end
@@ -474,20 +481,17 @@ end
 
 id = 0
 loop do
-	r = find_id_or_nmx(id, 5)
+	r = find_id_or_nmx(id, 3)
 	break unless r
 	pp [id, r]
 	id += 1
 end
 
-# https://www.wolframalpha.com/input/?i=partial+sum(n*(n-1))
-def num_of_ids_required(n)
-	((n-1) * n * (n+1)) / 3
-end
-		
-
-pp "req:", num_of_ids_required(3)
 pp find_id_or_nmx(4)
 
-pp shares = ShamirSecretSharing::NonPacked.split("this is a test", 4, 3)
-pp ShamirSecretSharing::NonPacked.combine(shares[0...3])
+entrophy = SecureRandom.random_bytes(128 / 8)
+puts "entropy=#{entrophy.unpack("H*")}"
+shares = ShamirSecretSharing::Packed.split(entrophy, 3, 3)
+
+pp shares
+puts "decoded: #{ShamirSecretSharing::Packed.combine(shares[0...3]).unpack("H*")}"
