@@ -1,3 +1,6 @@
+require "pp"
+
+
 # Mnemonic code for generating deterministic keys 
 # 
 # Why?
@@ -384,7 +387,7 @@ class ShamirSecretSharing
 			} % prime
 			[x, num_bytes, y]
 		}
-		pack(shares)
+		pack(shares, needed)
 	end
 
 	def self.combine(shares)
@@ -417,10 +420,15 @@ class ShamirSecretSharing
 	class ShareSanityCheckError < ::StandardError; end
 
 	class Packed < ShamirSecretSharing # packing format and checkum
-		def self.pack(shares)
+		def self.pack(shares, needed)
+			available = shares.size
 			shares.map{|x,num_bytes,y|
+				nr = x.to_s.to_i
+				puts "#{needed} of #{available}, share #{nr}"
 				# 4 bit: version (currently 0)
-				# 4 bit: 
+				# 9 bit checksum (1/512. Calculated on whole data, where checkusm is set to 0.
+				# 3 bit: n-of-m up to 3of3, with share.
+				# == 16bit overhead.
 				buf = [ x, num_bytes, y.to_s(16) ].pack("CnH*")
 				checksum = Digest::SHA512.digest(buf)[0...2]
 				encode(checksum << buf)
@@ -445,25 +453,41 @@ class ShamirSecretSharing
 	end
 end
 
-def print_types(max_m)
-	# 0: 1 of 1, nr. 1
-	# 1: 1 of 2, nr. 1
-	# 2: 1 of 2, nr. 2
-	# 3: 2 of 2, nr. 1
-	# n of m
-	i = 0
+
+# converts an ID to n-of-m and nr. of the share.
+def find_id_or_nmx(id_or_nmx, max_m=3)
+	find_id = !id_or_nmx.is_a?(Enumerable)
+	
+	return [0, 1, 1, 1] if (find_id ? id_or_nmx == 0 : is_a == [1,1,1])
+	
+	id = 0
 	max_m.times do |m|
-		(m+1).times do |n|
+		m.times do |n|
 			(m+1).times do |nr|
-				puts "#{i}: #{n+1} of #{m+1}, nr. #{nr+1}"
-				i += 1
+				return [id, n+2, m+1, nr+1] if (find_id ? is_a == id : is_a == [n+2, m+1, nr+1])
+				id += 1
 			end
 		end
 	end
+	nil
 end
 
-print_types(4)
+id = 0
+loop do
+	r = find_id_or_nmx(id, 5)
+	break unless r
+	pp [id, r]
+	id += 1
+end
 
-require "pp"
-pp shares = ShamirSecretSharing::NonPacked.split("this is a test", 3, 2)
+# https://www.wolframalpha.com/input/?i=partial+sum(n*(n-1))
+def num_of_ids_required(n)
+	((n-1) * n * (n+1)) / 3
+end
+		
+
+pp "req:", num_of_ids_required(3)
+pp find_id_or_nmx(4)
+
+pp shares = ShamirSecretSharing::NonPacked.split("this is a test", 4, 3)
 pp ShamirSecretSharing::NonPacked.combine(shares[0...3])
