@@ -173,6 +173,8 @@ References:
 * https://github.com/bitcoin/bips/wiki/Comments:BIP-0039
 * http://docs.electrum.org/en/latest/seedphrase.html
 
+* https://github.com/cetuscetus/btctool/blob/bip/bip-xxxx.mediawiki 
+
 * emoji encoding
 * render in a few different fonts, save as images: https://gist.githubusercontent.com/endolith/157796/raw/a37a313160a2e9d9de8d7c8151ddb9b3cc250e0d/Unicode%2520official%2520emojis.txt
 * calculate difference metric between images, select top 256 visually most different entries
@@ -495,3 +497,19 @@ shares = ShamirSecretSharing::Packed.split(entrophy, 3, 3)
 
 pp shares
 puts "decoded: #{ShamirSecretSharing::Packed.combine(shares[0...3]).unpack("H*")}"
+
+
+p [0, 1, 1, 1]
+
+id = 0
+5.times do |m|
+	m.times do |n|
+		(m+1).times do |nr|
+			nmx = [n+2, m+1, nr+1]
+			p [id] + nmx
+			id += 1
+		end
+	end
+end
+puts Math.log(id)/Math.log(2)
+nil
