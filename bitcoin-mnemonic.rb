@@ -419,11 +419,13 @@ class ShamirSecretSharing
 	class Packed < ShamirSecretSharing # packing format and checkum
 		def self.pack(shares)
 			shares.map{|x,num_bytes,y|
+				# 4 bit: version (currently 0)
+				# 4 bit: 
 				buf = [ x, num_bytes, y.to_s(16) ].pack("CnH*")
 				checksum = Digest::SHA512.digest(buf)[0...2]
 				encode(checksum << buf)
 				
-				y.to_s(16).pack("H*")
+				#y.to_s(16).pack("H*")
 			}
 		end
 		def self.unpack(shares)
@@ -433,8 +435,6 @@ class ShamirSecretSharing
 				checksum, buf = buf.unpack("a2a*")
 				raise ShareChecksumError, "share: #{i}" unless checksum == Digest::SHA512.digest(buf)[0...2]
 				i = buf.unpack("CnH*"); [ i[0], i[1], i[2].to_i(16) ]
-				
-				
 			}
 		end
 	end
@@ -444,6 +444,25 @@ class ShamirSecretSharing
 		def self.decode(string); string; end
 	end
 end
+
+def print_types(max_m)
+	# 0: 1 of 1, nr. 1
+	# 1: 1 of 2, nr. 1
+	# 2: 1 of 2, nr. 2
+	# 3: 2 of 2, nr. 1
+	# n of m
+	i = 0
+	max_m.times do |m|
+		(m+1).times do |n|
+			(m+1).times do |nr|
+				puts "#{i}: #{n+1} of #{m+1}, nr. #{nr+1}"
+				i += 1
+			end
+		end
+	end
+end
+
+print_types(4)
 
 require "pp"
 pp shares = ShamirSecretSharing::NonPacked.split("this is a test", 3, 2)
