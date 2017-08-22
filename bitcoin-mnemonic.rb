@@ -349,6 +349,8 @@ With the standard values currently used in Electrum, we obtain: 2^(132 + 11 - 8)
 Next  Previous
 
 
+
+
 =end
 
 
@@ -361,9 +363,19 @@ class ShamirSecretSharing
 	def self.pack(shares); shares; end
 	def self.unpack(shares); shares; end
 	
-	def self.encode(id, checksum0, checksum1, yHex); 
-		[((id << 1) | (checksum0 & 1)), checksum1, yHex].pack("CCH*")
+	# 4 bit: version (currently 0)
+	# 2 bit: x: 1,2,3 or 4.
+	# 10 bit: checksum XOR (2 bit needed, 8 bit checksum payload)
+	# == 16bit overhead.
+	def encode(version, x, checksum, needed, checksum_secret, yHex)
+		cs0 = (checksum[0] ^ needed) & 0x7
+		cs1 = checksum[1] ^ checksum_secret[0]
+
+		[ (version << 4) | (x << 2) | cs0, cs1, yHex ].pack("CCH*")
 	end
+#	def self.encode(id, checksum0, checksum1, yHex)
+#		[((id << 1) | (checksum[0] & 1)), checksum[1], yHex].pack("CCH*")
+#	end
 	def self.decode(string); string; end
 
 	def self.smallest_prime_of_bytelength(bytelength)
@@ -392,7 +404,9 @@ class ShamirSecretSharing
 			} % prime
 			[x, num_bytes, y]
 		}
-		pack(shares, needed)
+
+		checksum_secret = Digest::SHA512.digest(secret)[0..2].unpack("C*")
+		pack(shares, needed, checksum_secret)
 	end
 
 	def self.combine(shares)
@@ -425,29 +439,48 @@ class ShamirSecretSharing
 	class ShareSanityCheckError < ::StandardError; end
 
 	class Packed < ShamirSecretSharing # packing format and checkum
-		def self.pack(shares, needed)
+		def self.pack(shares, needed, checksum_secret)
 			available = shares.size
+
+			version = 0
 			shares.map{|x,num_bytes,y|
-				# 4 bit: version (currently 0)
-				# 3 bit: n-of-m up to 3of3, with share.
-				# 9 bit checksum (1/512. Calculated on whole data, where checkusm is set to 0.
-				# == 16bit overhead.
-				nr = x.to_s.to_i
-				id, _ = find_id_or_nmx([needed, available, nr])
+				x = x.to_s.to_i
 				yHex = y.to_s(16).rjust(num_bytes*2, '0')
-				buf = encode(id, 0, 0, yHex)
-				checksum = Digest::SHA512.digest(buf)[0...2].unpack("C*")
+
+				# calculate original checksum
+				buf = encode(version, x, [0, 0], 0, [0,0], yHex)
 				
 				# interleave with checksum
-				blob = encode(id, checksum[0], checksum[1], yHex)
-				to_text(blob)
+				checksum = Digest::SHA512.digest(buf)[0...2].unpack("C*")
+				buf = encode(version, x, checksum, needed, checksum_secret, yHex)
+				
+				to_text(buf)
 			}
 		end
 		def self.unpack(shares)
 			shares.map{|i|
 				blob = from_text(i)
+#				cs0 = (checksum[0] ^ needed) & 0x7
+#				cs1 = checksum[1] ^ checksum_secret[0]
+#				[ (version << 4) | (x << 2) | cs0, cs1, yHex ].pack("CCH*")
+
+				a,b,yHex = blob.unpack("CCH*")
+				version = a>>4
+				x = (a >> 2) & 0x3
+
+				# calculate original checksum
+				buf = encode(version, x, [0, 0], 0, [0,0], yHex)
+
+				# TODO xor here
+
+
+				
+				encode()
+
 				# first, make sure checksum is ok.
 				a, b, yHex = blob.unpack("CCH*")
+
+
 				id = (a >> 1) & 0x7 # only 3 bits for id
 				buf = encode(id, 0, 0, yHex)
 				checksum = Digest::SHA512.digest(buf)[0...2].unpack("C*")
@@ -496,7 +529,7 @@ puts "entropy=#{entrophy.unpack("H*")}"
 shares = ShamirSecretSharing::Packed.split(entrophy, 3, 3)
 
 pp shares
-puts "decoded: #{ShamirSecretSharing::Packed.combine(shares[0...3]).unpack("H*")}"
+puts "decoded: #{ShamirSecretSharing::Packed.combine(shares[0...2]).unpack("H*")}"
 
 
 p [0, 1, 1, 1]
@@ -513,3 +546,31 @@ id = 0
 end
 puts Math.log(id)/Math.log(2)
 nil
+
+
+# required bits: n^2
+# 0: n=1, nr=1
+# 1: n=2, nr=1
+
+# 2: n=2, nr=2
+
+# 3: n=1, nr=3
+# 4: n=2, nr=3
+# 5: n=3, nr=3
+
+# 6: n=1, nr=4
+# 7: n=2, nr=4
+# 8: n=3, nr=4
+# 9: n=4, nr=4
+
+def num_req(n)
+	(n*(n+1)) / 2
+end
+
+
+def id_to_n(id)
+
+
+(1...40).each do |i|
+	puts "#{i} #{num_req(i)} #{Math.log(num_req(i)) / Math.log(2)}"
+end
