@@ -365,13 +365,13 @@ class ShamirSecretSharing
 	
 	# 4 bit: version (currently 0)
 	# 2 bit: x: 1,2,3 or 4.
-	# 10 bit: checksum XOR (2 bit needed, 8 bit checksum payload)
+	# 10 bit: checksum XOR (2 bit needed (1,2,3,4), 8 bit checksum payload)
 	# == 16bit overhead.
-	def encode(version, x, checksum, needed, checksum_secret, yHex)
-		cs0 = (checksum[0] ^ needed) & 0x7
-		cs1 = checksum[1] ^ checksum_secret[0]
+	def self.encode(version, x, checksum_share, needed, checksum_secret, yHex)
+		cs0 = (checksum_share[0] ^ (needed - 1)) & 0x3
+		cs1 = checksum_share[1] ^ checksum_secret[0]
 
-		[ (version << 4) | (x << 2) | cs0, cs1, yHex ].pack("CCH*")
+		[ (version << 4) | ((x-1) << 2) | cs0, cs1, yHex ].pack("CCH*")
 	end
 #	def self.encode(id, checksum0, checksum1, yHex)
 #		[((id << 1) | (checksum[0] & 1)), checksum[1], yHex].pack("CCH*")
@@ -390,12 +390,12 @@ class ShamirSecretSharing
 		raise ArgumentError, "available must be <= 250"    unless available <= 250
 
 		num_bytes = secret.bytesize
-		secret = OpenSSL::BN.new(secret.unpack("H*")[0], 16) rescue OpenSSL::BN.new("0") # without checksum
+		secret_bn = OpenSSL::BN.new(secret.unpack("H*")[0], 16) rescue OpenSSL::BN.new("0") # without checksum
 		raise ArgumentError, "bytelength of secret must be >= 1"   if num_bytes < 1
 		raise ArgumentError, "bytelength of secret must be <= 512" if num_bytes > 512
 
 		prime  = smallest_prime_of_bytelength(num_bytes)
-		coef = [ secret ] + Array.new(needed-1){ OpenSSL::BN.rand(num_bytes * 8) }
+		coef = [ secret_bn ] + Array.new(needed-1){ OpenSSL::BN.rand(num_bytes * 8) }
 
 		shares = (1..available).map{|x|
 			x = OpenSSL::BN.new(x.to_s)
@@ -448,11 +448,11 @@ class ShamirSecretSharing
 				yHex = y.to_s(16).rjust(num_bytes*2, '0')
 
 				# calculate original checksum
-				buf = encode(version, x, [0, 0], 0, [0,0], yHex)
+				buf = encode(version, x, [0,0], 0, [0,0], yHex)
 				
 				# interleave with checksum
-				checksum = Digest::SHA512.digest(buf)[0...2].unpack("C*")
-				buf = encode(version, x, checksum, needed, checksum_secret, yHex)
+				checksum_share = Digest::SHA512.digest(buf)[0...2].unpack("C*")
+				buf = encode(version, x, checksum_share, needed, checksum_secret, yHex)
 				
 				to_text(buf)
 			}
@@ -460,35 +460,22 @@ class ShamirSecretSharing
 		def self.unpack(shares)
 			shares.map{|i|
 				blob = from_text(i)
-#				cs0 = (checksum[0] ^ needed) & 0x7
-#				cs1 = checksum[1] ^ checksum_secret[0]
-#				[ (version << 4) | (x << 2) | cs0, cs1, yHex ].pack("CCH*")
 
 				a,b,yHex = blob.unpack("CCH*")
 				version = a>>4
-				x = (a >> 2) & 0x3
+				x = 1 + ((a >> 2) & 0x3)
 
 				# calculate original checksum
-				buf = encode(version, x, [0, 0], 0, [0,0], yHex)
-
-				# TODO xor here
-
-
+				checksum_share = [0,0]
+				checksum_secret = [0,0]
+				buf = encode(version, x, [0,0], 0, [0,0], yHex)
+				checksum_share = Digest::SHA512.digest(buf)[0...2].unpack("C*")
 				
-				encode()
-
-				# first, make sure checksum is ok.
-				a, b, yHex = blob.unpack("CCH*")
-
-
-				id = (a >> 1) & 0x7 # only 3 bits for id
-				buf = encode(id, 0, 0, yHex)
-				checksum = Digest::SHA512.digest(buf)[0...2].unpack("C*")
-				# interleave with checksum
-				buf = encode(id, checksum[0], checksum[1], yHex)
-				raise ShareChecksumError, "share: #{i}" unless buf == blob
-
-				id, n, m, x = find_id_or_nmx(id)
+				# xor here
+				needed = 1 + ((checksum_share[0] ^ a) & 0x3)
+				checksum_secret = checksum_share[1] ^ b
+				
+				puts "needed=#{needed}, checksum_secret=#{checksum_secret.to_s(16)}"
 
 				[x, yHex.size/2, yHex.to_i(16)]
 			}
@@ -526,51 +513,10 @@ pp find_id_or_nmx(4)
 
 entrophy = SecureRandom.random_bytes(128 / 8)
 puts "entropy=#{entrophy.unpack("H*")}"
-shares = ShamirSecretSharing::Packed.split(entrophy, 3, 3)
+shares = ShamirSecretSharing::Packed.split(entrophy, 4, 3)
 
 pp shares
-puts "decoded: #{ShamirSecretSharing::Packed.combine(shares[0...2]).unpack("H*")}"
+decoded = ShamirSecretSharing::Packed.combine(shares[0...3])
+p Digest::SHA512.digest(decoded).unpack("H*")
+puts "decoded: #{decoded.unpack("H*")}"
 
-
-p [0, 1, 1, 1]
-
-id = 0
-5.times do |m|
-	m.times do |n|
-		(m+1).times do |nr|
-			nmx = [n+2, m+1, nr+1]
-			p [id] + nmx
-			id += 1
-		end
-	end
-end
-puts Math.log(id)/Math.log(2)
-nil
-
-
-# required bits: n^2
-# 0: n=1, nr=1
-# 1: n=2, nr=1
-
-# 2: n=2, nr=2
-
-# 3: n=1, nr=3
-# 4: n=2, nr=3
-# 5: n=3, nr=3
-
-# 6: n=1, nr=4
-# 7: n=2, nr=4
-# 8: n=3, nr=4
-# 9: n=4, nr=4
-
-def num_req(n)
-	(n*(n+1)) / 2
-end
-
-
-def id_to_n(id)
-
-
-(1...40).each do |i|
-	puts "#{i} #{num_req(i)} #{Math.log(num_req(i)) / Math.log(2)}"
-end
