@@ -359,6 +359,36 @@ Next  Previous
 require 'openssl'
 require 'digest/sha1'
 
+
+PRIMES = {
+	16 => OpenSSL::BN.new((2**(8*16) + 51).to_s),
+	18 => OpenSSL::BN.new((2**(8*18) + 175).to_s),
+	20 => OpenSSL::BN.new((2**(8*20) + 7).to_s),
+	22 => OpenSSL::BN.new((2**(8*22) + 427).to_s),
+	24 => OpenSSL::BN.new((2**(8*24) + 133).to_s),
+	26 => OpenSSL::BN.new((2**(8*26) + 375).to_s),
+	28 => OpenSSL::BN.new((2**(8*28) + 735).to_s),
+	30 => OpenSSL::BN.new((2**(8*30) + 115).to_s),
+	32 => OpenSSL::BN.new((2**(8*32) + 297).to_s),
+	34 => OpenSSL::BN.new((2**(8*34) + 57).to_s),
+	36 => OpenSSL::BN.new((2**(8*36) + 127).to_s),
+	38 => OpenSSL::BN.new((2**(8*38) + 37).to_s),
+	40 => OpenSSL::BN.new((2**(8*40) + 27).to_s),
+	42 => OpenSSL::BN.new((2**(8*42) + 241).to_s),
+	44 => OpenSSL::BN.new((2**(8*44) + 55).to_s),
+	46 => OpenSSL::BN.new((2**(8*46) + 127).to_s),
+	48 => OpenSSL::BN.new((2**(8*48) + 231).to_s),
+	50 => OpenSSL::BN.new((2**(8*50) + 181).to_s),
+	52 => OpenSSL::BN.new((2**(8*52) + 235).to_s),
+	54 => OpenSSL::BN.new((2**(8*54) + 1093).to_s),
+	56 => OpenSSL::BN.new((2**(8*56) + 211).to_s),
+	58 => OpenSSL::BN.new((2**(8*58) + 841).to_s),
+	60 => OpenSSL::BN.new((2**(8*60) + 165).to_s),
+	62 => OpenSSL::BN.new((2**(8*62) + 583).to_s),
+	64 => OpenSSL::BN.new((2**(8*64) + 75).to_s),
+}
+
+
 class ShamirSecretSharing
 	def self.pack(shares); shares; end
 	def self.unpack(shares); shares; end
@@ -379,12 +409,11 @@ class ShamirSecretSharing
 	def self.decode(string); string; end
 
 	def self.smallest_prime_of_bytelength(bytelength)
-		n = OpenSSL::BN.new((2**(bytelength*8)+1).to_s)
-		loop{ break if n.prime_fasttest?(20); n += 2 }
-		n
+		PRIMES[bytelength]
 	end
 
 	def self.split(secret, available, needed)
+		t = Time.now
 		raise ArgumentError, "needed must be <= available" unless needed <= available
 		raise ArgumentError, "needed must be >= 2"         unless needed >= 2
 		raise ArgumentError, "available must be <= 250"    unless available <= 250
@@ -395,7 +424,8 @@ class ShamirSecretSharing
 		raise ArgumentError, "bytelength of secret must be <= 512" if num_bytes > 512
 
 		prime  = smallest_prime_of_bytelength(num_bytes)
-		coef = [ secret_bn ] + Array.new(needed-1){ OpenSSL::BN.rand(num_bytes * 8) }
+		#coef = [ secret_bn ] + Array.new(needed-1){ OpenSSL::BN.rand(num_bytes * 8) }
+		coef = [ secret_bn ] + Array.new(needed-1){ OpenSSL::BN.new(SecureRandom.random_bytes(num_bytes).unpack("H*")[0], 16) }
 
 		shares = (1..available).map{|x|
 			x = OpenSSL::BN.new(x.to_s)
@@ -421,6 +451,10 @@ class ShamirSecretSharing
 			secret = (secret + summand) % prime
 		}
 		secret = [ secret.to_s(16).rjust(num_bytes*2, '0') ].pack("H*")
+		
+		# compare checksum
+		raise ShareDecodeError "secret checksum does not match!" unless Digest::SHA512.digest(secret)[0].ord == shares[0][4]
+		secret
 	end
 
 	# Part of the Lagrange interpolation.
@@ -458,7 +492,8 @@ class ShamirSecretSharing
 			}
 		end
 		def self.unpack(shares)
-			shares.map{|i|
+			
+			result = shares.map{|i|
 				blob = from_text(i)
 
 				a,b,yHex = blob.unpack("CCH*")
@@ -477,8 +512,13 @@ class ShamirSecretSharing
 				
 				puts "needed=#{needed}, checksum_secret=#{checksum_secret.to_s(16)}"
 
-				[x, yHex.size/2, yHex.to_i(16)]
+				[x, yHex.size/2, yHex.to_i(16), needed, checksum_secret]
 			}
+			needed = result[0][3]
+			checksum_secret = result[0][4]
+			result.each do |x|
+				raise ShareChecksumError, "needed / checksum do not match" unless (needed == x[3] && checksum_secret == x[4])
+			end
 		end
 	end
 end
@@ -509,14 +549,24 @@ loop do
 	id += 1
 end
 
+def gen_prime_table
+	(16..64).step(2) do |i|
+		n = OpenSSL::BN.new((2**(i*8)).to_s)
+		x = 1
+		loop{ break if (n+x).prime_fasttest?(100); x += 2 }
+		puts "#{i} => OpenSSL::BN.new((2**(8*#{i}) + #{x}).to_s),"
+	end
+end
+
 pp find_id_or_nmx(4)
 
 entrophy = SecureRandom.random_bytes(128 / 8)
 puts "entropy=#{entrophy.unpack("H*")}"
-shares = ShamirSecretSharing::Packed.split(entrophy, 4, 3)
+shares = ShamirSecretSharing::Packed.split(entrophy, 3, 2)
 
+
+#shares[1][12]='l'
 pp shares
-decoded = ShamirSecretSharing::Packed.combine(shares[0...3])
-p Digest::SHA512.digest(decoded).unpack("H*")
+decoded = ShamirSecretSharing::Packed.combine(shares[0...2])
 puts "decoded: #{decoded.unpack("H*")}"
 
