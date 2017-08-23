@@ -174,6 +174,7 @@ References:
 * http://docs.electrum.org/en/latest/seedphrase.html
 
 * https://github.com/cetuscetus/btctool/blob/bip/bip-xxxx.mediawiki 
+* Use GF(256), see https://github.com/codahale/shamir/blob/master/src/main/java/com/codahale/shamir/GF256.java
 
 * emoji encoding
 * render in a few different fonts, save as images: https://gist.githubusercontent.com/endolith/157796/raw/a37a313160a2e9d9de8d7c8151ddb9b3cc250e0d/Unicode%2520official%2520emojis.txt
@@ -359,7 +360,7 @@ Next  Previous
 require 'openssl'
 require 'digest/sha1'
 
-
+=begin
 PRIMES = {
 	16 => OpenSSL::BN.new((2**(8*16) + 51).to_s),
 	18 => OpenSSL::BN.new((2**(8*18) + 175).to_s),
@@ -387,9 +388,42 @@ PRIMES = {
 	62 => OpenSSL::BN.new((2**(8*62) + 583).to_s),
 	64 => OpenSSL::BN.new((2**(8*64) + 75).to_s),
 }
+=end
+
+PRIMES = {
+	16 => OpenSSL::BN.new('EB268DF016D867199C7ACDE13B0D65E7', 16),
+	18 => OpenSSL::BN.new('FE60D99CDA373B96F4AF5914E94FB11862A3', 16),
+	20 => OpenSSL::BN.new('CFAB4DCABAF1AE2DB407192B750F826674CA63FF', 16),
+	22 => OpenSSL::BN.new('E759C5E5DCB4E188FC32E683079F86A055D4A43F7837', 16),
+	24 => OpenSSL::BN.new('C18E30F86EB027241C11CDB9CC1CAF2E4CFB6444F036C747', 16),
+	26 => OpenSSL::BN.new('E6454E5256B1F63496839C879031D1DA1ABEF98C5B904510ED3F', 16),
+	28 => OpenSSL::BN.new('F79438E24F6193DBD163AF425A6DA623FF8AB27093BD5D7A67DE15C7', 16),
+	30 => OpenSSL::BN.new('CC996207A90553CF32C7633146F7C318B10DF83230FA9C098AF378551F97', 16),
+	32 => OpenSSL::BN.new('DCF90E58C6A357781D201E43A237E6EF618B02EB256565C0D45501746A3BD30F', 16),
+	34 => OpenSSL::BN.new('F4D26896030F206E87B01756B99E12AF4E55654C76C367DF9143A3AC77F4244A0E47', 16),
+	36 => OpenSSL::BN.new('FBCF614CD685488153943718BCC2C225F28FEBEAE1299831C5992C8A8E9A9AB30D405D87', 16),
+	38 => OpenSSL::BN.new('D25847715986B88D251682274D866610CF69F3CE3FC9F0C72429E3E339B0DE61013E9859116B', 16),
+	40 => OpenSSL::BN.new('E55D957FD4DBE760A9773F5F71CE48282F3207BB208F799FD8F926FC3ECF8BA470CBA39B8D9F134B', 16),
+	42 => OpenSSL::BN.new('C2AE337457D78A4AE4D655CFE2DC94C0E767F035F23CB061404507299BD5C2F5AD0CA83F918C08C6FCAB', 16),
+	44 => OpenSSL::BN.new('C9E0FAE18A8F29EBB83BC735DC68A3503CCD45F6E8C86E594144128EF0588870B37AFA3AF4860513714298DF', 16),
+	46 => OpenSSL::BN.new('CA2EF45AB58966E643574CAD63739DA5669448716B9CA58DC947B3FB8003EB48ADC204BEF869F133FADBFDEBAE7F', 16),
+	48 => OpenSSL::BN.new('C494E560792C59EA03E6DDE24EE484F9F38347A0DC03ECC47A0E39897D8390F456018D02F2CB5D52EDABEDF89B006057', 16),
+	50 => OpenSSL::BN.new('EB4F5402136F73B3E3993E861BD01CFD170BE918B475147686E0A7A62B758D5CED7D7B4C1D32B6C941B167B6ADBA714201DF', 16),
+	52 => OpenSSL::BN.new('D4B5B736436E54FCB640BB107C568F385BF625F44DEC81D338A09A3C3515842EB4082118CFEC5395E0136AC84DB97C2F1F23687B', 16),
+	54 => OpenSSL::BN.new('F48A4B20304A1BAA4ABD0EBDC312DF31154527220CFB48F0568DB04A4960EAA2DB75B615B822B3A2A0BAE653C25F6457E964917C2A57', 16),
+	56 => OpenSSL::BN.new('E1F13DF796CB8FBE7CBA8C0EEC54F925F002E038F918403A5FD1983CFFFC654F3403A1C4D65BD9D2E3655FC3254ED1DC49BCD27B14F6B20F', 16),
+	58 => OpenSSL::BN.new('CF0B1A3F14A1D14052645400D46EE9D70182C1829003C236853BDE7FE1D31FC2D272B7F88D4C1C381EA5284C56AB62D2F276354E353DE1A57C9F', 16),
+	60 => OpenSSL::BN.new('CA16E242110FE2D15D550D5DF702D6793C4F778701991DA888F9DE5F0E03835870548D3FAEC878F61D9DD07389D5FA060612ED650857E0861FCE3983', 16),
+	62 => OpenSSL::BN.new('C6CFBF551BF0E0607E47E5DBCBBF2D65591D16AF6C6620F120A3399D2E7B285FD87790CB5350FC862669E0F32F45F2ED89FCC77F59D426E374B5C85309F3', 16),
+	64 => OpenSSL::BN.new('C7A3CDEC9FC114D389734D8DAB0137B31C1B330DF336060D5CFCD9EC0B93419D580DA370E45151A0CE3AF048C5136049528FBE3E4C00E139BB763FC3F14E3693', 16),}
 
 
 class ShamirSecretSharing
+
+	class ShareChecksumError < ::StandardError; end
+	class ShareDecodeError < ::StandardError; end
+	class ShareSanityCheckError < ::StandardError; end
+	
 	def self.pack(shares); shares; end
 	def self.unpack(shares); shares; end
 	
@@ -453,7 +487,7 @@ class ShamirSecretSharing
 		secret = [ secret.to_s(16).rjust(num_bytes*2, '0') ].pack("H*")
 		
 		# compare checksum
-		raise ShareDecodeError "secret checksum does not match!" unless Digest::SHA512.digest(secret)[0].ord == shares[0][4]
+		raise ShareDecodeError, "secret checksum does not match!" unless Digest::SHA512.digest(secret)[0].ord == shares[0][4]
 		secret
 	end
 
@@ -468,9 +502,6 @@ class ShamirSecretSharing
 		}.inject{|p,f| p.mod_mul(f, prime) }
 	end
 
-	class ShareChecksumError < ::StandardError; end
-	class ShareDecodeError < ::StandardError; end
-	class ShareSanityCheckError < ::StandardError; end
 
 	class Packed < ShamirSecretSharing # packing format and checkum
 		def self.pack(shares, needed, checksum_secret)
@@ -510,7 +541,7 @@ class ShamirSecretSharing
 				needed = 1 + ((checksum_share[0] ^ a) & 0x3)
 				checksum_secret = checksum_share[1] ^ b
 				
-				puts "needed=#{needed}, checksum_secret=#{checksum_secret.to_s(16)}"
+				# puts "needed=#{needed}, checksum_secret=#{checksum_secret.to_s(16)}"
 
 				[x, yHex.size/2, yHex.to_i(16), needed, checksum_secret]
 			}
@@ -549,6 +580,7 @@ loop do
 	id += 1
 end
 
+=begin
 def gen_prime_table
 	(16..64).step(2) do |i|
 		n = OpenSSL::BN.new((2**(i*8)).to_s)
@@ -557,9 +589,94 @@ def gen_prime_table
 		puts "#{i} => OpenSSL::BN.new((2**(8*#{i}) + #{x}).to_s),"
 	end
 end
+=end
+def gen_prime_table
+	(16..64).step(2) do |i|
+		n = OpenSSL::BN.generate_prime(i*8)
+		puts "#{i} => OpenSSL::BN.new('#{n.to_s(16)}', 16),"
+	end
+end
+
 
 pp find_id_or_nmx(4)
 
+def diff(a, b)
+	str = ""
+	[a.size, b.size].max.times do |i|
+		if a[i] == b[i]
+			str += " "
+		else
+			str += "^"
+		end
+	end
+	str
+end
+
+def find_collision(needed, available)
+	collisions = 0
+	error_checksum_detected = 0
+	error_decoding_detected = 0
+	type_error = 0
+	
+	loop do
+		entrophy = SecureRandom.random_bytes(128 / 8)
+		shares = ShamirSecretSharing::Packed.split(entrophy, available, needed)
+
+		# modify one random letter
+		s = shares[0].clone
+		s = s.gsub(" ", "")
+
+
+		pos = rand(s.size-1)+1
+		
+		letters = CONSONANTS 
+		letters = VOVELS if 1 == ((pos%5)%2)
+		
+		l = nil
+		begin
+			l = letters[rand(letters.size)]
+		end while l == s[pos]
+		s[pos] = l
+		
+		begin
+			decoded = ShamirSecretSharing::Packed.combine([s, shares[1]])
+			collisions += 1
+			puts
+			puts "errors checksum detected: #{error_checksum_detected}"
+			puts "error decoding detected: #{error_decoding_detected}"
+			puts "error probability: 1/#{(error_decoding_detected+error_checksum_detected)/collisions.to_f}"
+			puts "collisions: #{collisions}"
+			puts "type error: #{type_error}"
+			puts "entrophy = #{entrophy.unpack('H*')[0]}"
+			puts "decoded  = #{decoded.unpack('H*')[0]}"
+			puts "           #{diff(entrophy.unpack('H*')[0], decoded.unpack('H*')[0])}"
+			puts "equal? #{entrophy == decoded}"
+			puts "share = #{shares[0].gsub(" ", "")}"
+			puts "modif = #{s}"
+			puts "        #{diff(s, shares[0].gsub(" ", ""))}"
+		rescue ShamirSecretSharing::ShareChecksumError => e
+			error_checksum_detected += 1
+		rescue ShamirSecretSharing::ShareDecodeError => e
+			error_decoding_detected += 1
+		rescue TypeError => e
+			type_error += 1
+		end
+		
+		if (error_checksum_detected % 10000 == 0)
+			puts "error probability: 1/#{(error_decoding_detected+error_checksum_detected)/collisions.to_f} (#{collisions+error_checksum_detected+error_decoding_detected+type_error} evals)"
+			STDOUT.flush
+		end
+	end
+end
+
+#gen_prime_table
+
+find_collision(2, 3)
+
+# 1/228102.2 2of2
+# 
+
+=begin
 entrophy = SecureRandom.random_bytes(128 / 8)
 puts "entropy=#{entrophy.unpack("H*")}"
 shares = ShamirSecretSharing::Packed.split(entrophy, 3, 2)
@@ -570,3 +687,4 @@ pp shares
 decoded = ShamirSecretSharing::Packed.combine(shares[0...2])
 puts "decoded: #{decoded.unpack("H*")}"
 
+=end
