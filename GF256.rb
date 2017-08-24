@@ -142,3 +142,5 @@ pp shares
 secret = GF256::join([shares[0], shares[7], shares[2]])
 pp secret
 =end
+
+#p [1,2, "asdf\x00a"].pack("CCa*")
