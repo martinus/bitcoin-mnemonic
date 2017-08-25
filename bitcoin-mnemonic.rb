@@ -75,8 +75,10 @@ Rules for decoding:
 require "securerandom"
 
 class Crypto
+	RNG = Random.new
+
 	def self.hash(data)
-		Digest::SHA512.digest(data)
+		Digest::SHA256.digest(data)
 	end
 	
 	def self.random_bytes(n)
@@ -88,7 +90,9 @@ class Crypto
 	end
 end
 	
-
+# Converts a byte stream into readable string.
+# Based on "A Proposal for Proquints: Identifiers that are Readable, Spellable, and Pronounceable"
+# See https://arxiv.org/html/0901.4016
 class ProquintsEncoder
 	class ProquintsEncoderError < ::StandardError; end
 	
@@ -98,9 +102,26 @@ class ProquintsEncoder
 	# 4 bits
 	CONSONANTS = "bdfghjklmnprstvz".split("")
 
-	# Converts a byte stream into readable string.
-	# Based on "A Proposal for Proquints: Identifiers that are Readable, Spellable, and Pronounceable"
-	# See https://arxiv.org/html/0901.4016
+	def self.add_byte_to_val(letters, h)
+		letters.each_index do |i|
+			l = letters[i]
+			h[l.upcase.ord] = i
+			h[l.downcase.ord] = i
+		end
+		h
+	end
+	
+	def self.calc_byte_to_val
+		h = {}
+		add_byte_to_val(VOVELS, h)
+		add_byte_to_val(CONSONANTS, h)
+		h
+	end
+	
+	# maps from byte to value and bits, for quick decoding.
+	BYTE_TO_VAL_BITS = calc_byte_to_val
+	
+	
 	def self.encode(blob)
 		raise ProquintsEncoderError, "blob size needs to be even number (multiple of 16 bit)" unless blob.size.even?
 
@@ -119,6 +140,30 @@ class ProquintsEncoder
 	end
 
 	def self.decode(text)
+		n = 0
+		idx = 0		
+		data = ""
+		
+		text.each_byte do |b|
+			nr = BYTE_TO_VAL_BITS[b]
+			next if nr.nil?
+			
+			n <<= idx.even? ? 4 : 2
+			n |= nr
+			idx += 1
+			
+			if (idx == 5)
+				# we got a full word, add it
+				data << (n>>8).chr
+				data << (n & 0xff).chr
+				idx = 0
+				n = 0
+			end
+		end
+		data
+	end
+	
+	def self.decode_reference(text)
 		# all non-letters are removed
 		stripped = text.gsub(/[^a-zA-Z]/, "")
 		
@@ -143,7 +188,6 @@ end
 # This is a straight ruby port of Coda Hale's https://github.com/codahale/shamir
 # A bit simplified.
 # https://github.com/codahale/shamir/blob/master/src/main/java/com/codahale/shamir/GF256.java
-
 class GF256
 	LOG = [
 		"ff00190132021ac64bc71b6833eedf036404e00e348d81ef4c7108c8f8691cc1" +
@@ -207,7 +251,7 @@ class GF256
 	end
 	
 	def self.generate(required_degree, x)
-		# generate random polynomials until we find one of the given degree
+		# generate random polynomials of the given degree
 		p = Crypto::random_bytes(required_degree + 1)
 		while p[-1].ord == 0
 			p[-1] = Crypto::random_bytes(1)
@@ -345,24 +389,15 @@ class BinaryEncoder
 end
 
 
-TIMER = Hash.new do |h,k| h[k] = 0.0 end
-
 class CompactMnemonic
 	class ChecksumError < ::StandardError; end
 
 	def self.encode(num_shares_needed, num_shares_total, secret)
-		t = Time.now;
 		shares = GF256::split(num_shares_needed, num_shares_total, secret)
-		
-		TIMER[:split] += Time.now - t; t = Time.now;
 		enc = BinaryEncoder::encode(secret, num_shares_needed, shares)
-		TIMER[:enc] += Time.now - t; t = Time.now;
-		
 		proquints = enc.map do |blob|
 			ProquintsEncoder::encode(blob)
 		end
-		TIMER[:proquints] += Time.now - t;
-		
 		proquints
 	end
 
@@ -382,86 +417,121 @@ end
 
 
 
-
-def diff(a, b)
-	str = ""
-	[a.size, b.size].max.times do |i|
-		if a[i] == b[i]
-			str += " "
-		else
-			str += "^"
+# some 
+if __FILE__ == $0
+	require 'minitest/autorun'
+	require 'minitest/benchmark'
+	
+	class TestEncodeDecode < Minitest::Test
+		def test_encode_decode
+			secret = Crypto::random_bytes(128/8)
+			shares = CompactMnemonic::encode(2, 3, secret)
+			decoded = CompactMnemonic::decode(shares[0..1])
+			
+			assert_equal secret, decoded
+		end
+		
+		def test_bench_encode
+			secret = Crypto::random_bytes(128/8)
+			t = Time.now
+			10000.times do 
+				CompactMnemonic::encode(3, 4, secret)
+			end
+			puts "\t#{10000/(Time.now - t)} CompactMnemonic::encode per second"
+		end
+		
+		def test_bench_decode
+			secret = Crypto::random_bytes(128/8)
+			shares = CompactMnemonic::encode(3, 4, secret)
+			t = Time.now
+			10000.times do 
+				CompactMnemonic::decode(shares)
+			end
+			puts "\t#{10000/(Time.now - t)} CompactMnemonic::decode per second"
 		end
 	end
-	str
-end
-
-def modify(share)
-	share = share.gsub(" ", "")
-	pos = Crypto::rand(share.size-1)+1
-		
-	letters = ProquintsEncoder::CONSONANTS 
-	letters = ProquintsEncoder::VOVELS if 1 == ((pos%5)%2)
-		
-	l = nil
-	begin
-		l = letters[Crypto::rand(letters.size)]
-	end while l == share[pos]
-	share[pos] = l
-	share
-end
-
-
-require "pp"
-
-num_collisions = 0
-num_err_checksum = 0
-num_err_version = 0
-num_err_final_checksum = 0
-num_total_runs = 0
-
-t_start = Time.now
-secret = Crypto::random_bytes(128/8)
-
-
-
-loop do
-	shares = CompactMnemonic::encode(2, 3, secret)
-	modified_share0 = shares[0]
 	
-	modified_share0 = modify(modified_share0)
-	begin
-		#pp [modified_share0, shares[1]]
-		decoded = CompactMnemonic::decode([modified_share0, shares[1]])
-		num_collisions += 1
-		
-		puts
-		puts "num_err_checksum: #{num_err_checksum}"
-		puts "num_err_version: #{num_err_version}"
-		puts "num_err_final_checksum: #{num_err_final_checksum}"
-		puts "num_collisions: #{num_collisions}"
-		puts "num_total_runs: #{num_total_runs}"
 
-		puts "share = #{shares[0].gsub(" ", "")}"
-		puts "modif = #{modified_share0}"
-		puts "        #{diff(shares[0].gsub(" ", ""), modified_share0)}"
-		puts "secret = #{secret.unpack("H*")[0]}"
-		puts "collis = #{decoded.unpack("H*")[0]}"
-		puts "         #{diff(secret.unpack("H*")[0], decoded.unpack("H*")[0])}"
-	rescue BinaryEncoder::ShareChecksumError => e
-		num_err_checksum += 1
-	rescue BinaryEncoder::ShareVersionError => e
-		num_err_version += 1
-	rescue CompactMnemonic::ChecksumError => e
-		num_err_final_checksum += 1
+
+	def diff(a, b)
+		str = ""
+		[a.size, b.size].max.times do |i|
+			if a[i] == b[i]
+				str += " "
+			else
+				str += "^"
+			end
+		end
+		str
 	end
+
+	def modify(share)
+		share = share.gsub(" ", "")
+		pos = Crypto::rand(share.size-1)+1
+			
+		letters = ProquintsEncoder::CONSONANTS 
+		letters = ProquintsEncoder::VOVELS if 1 == ((pos%5)%2)
+			
+		l = nil
+		begin
+			l = letters[Crypto::rand(letters.size)]
+		end while l == share[pos]
+		share[pos] = l
+		share
+	end	
 	
-	num_total_runs += 1
-	if num_total_runs % 10000 == 0
-		pp TIMER
-		if num_collisions != 0
-			puts "1/#{num_total_runs / num_collisions}, #{num_total_runs/(Time.now - t_start)}"
-		else
-			puts "#{num_total_runs}, #{num_total_runs/(Time.now - t_start)}"
+	class TestFindCollisions < Minitest::Test
+		def test_endless_collision_finding
+			#skip("not really a test, just runs and tries to find collisions.")
+			
+			num_collisions = 0
+			num_err_checksum = 0
+			num_err_version = 0
+			num_err_final_checksum = 0
+			num_total_runs = 0
+
+			t_start = Time.now
+			secret = Crypto::random_bytes(128/8)
+
+			shares = CompactMnemonic::encode(2, 3, secret)
+			modified_share0 = shares[0]
+			loop do
+				modified_share0 = modify(modified_share0)
+				begin
+					#pp [modified_share0, shares[1]]
+					decoded = CompactMnemonic::decode([modified_share0, shares[1]])
+					num_collisions += 1
+					
+					puts
+					puts "num_err_checksum: #{num_err_checksum}"
+					puts "num_err_version: #{num_err_version}"
+					puts "num_err_final_checksum: #{num_err_final_checksum}"
+					puts "num_collisions: #{num_collisions}"
+					puts "num_total_runs: #{num_total_runs}"
+
+					puts "share = #{shares[0].gsub(" ", "")}"
+					puts "modif = #{modified_share0}"
+					puts "        #{diff(shares[0].gsub(" ", ""), modified_share0)}"
+					puts "secret = #{secret.unpack("H*")[0]}"
+					puts "collis = #{decoded.unpack("H*")[0]}"
+					puts "         #{diff(secret.unpack("H*")[0], decoded.unpack("H*")[0])}"
+				rescue BinaryEncoder::ShareChecksumError => e
+					num_err_checksum += 1
+				rescue BinaryEncoder::ShareVersionError => e
+					num_err_version += 1
+				rescue CompactMnemonic::ChecksumError => e
+					num_err_final_checksum += 1
+				end
+				
+				num_total_runs += 1
+				if num_total_runs % 10000 == 0
+					if num_collisions != 0
+						puts "1/#{num_total_runs / num_collisions}, #{num_total_runs/(Time.now - t_start)}"
+					else
+						puts "#{num_total_runs}, #{num_total_runs/(Time.now - t_start)}"
+					end
+				end
+			end
 		end
 	end
 end
