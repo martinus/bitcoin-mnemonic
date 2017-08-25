@@ -1,11 +1,17 @@
-# Mnemonic code for generating deterministic keys 
-# 
-# Why?
-# * Get rid of a wordlist, be more language agnostic => improved portability
-# * 4 version bits encoded as the last 5 bits of the words. This is version 0. Therefore, the first letter encodes the version.
-# * Checksum is independent from wordlist.
-
 =begin
+Mnemonic code for generating deterministic keys 
+ 
+Why?
+* Get rid of a wordlist, be more language agnostic => improved portability, more compact.
+* Added versioning: 4 version bits, which defines encoding.
+* very compact representation: 16bit overhead.
+* No password support because it is inherently unsafe.
+* Support n-of-m shares, up to 4-of-4.
+* Fast computation also on low end devices
+* Good typo safety: probability for 2-of-n to generate a valid wrong key is 1 in 2^18.
+* Checksum is independent from wordlist.
+* very compact QR code: 128 bit encode into 45 Alphanumeric characters, so version 2 is enough: https://chart.googleapis.com/chart?chs=150x150&cht=qr&chl=BASABMIVAPPOTUFJULOHHIFOBRIGIJPAJIHLUTOLHAJAJ
+
 References:
 * https://en.bitcoin.it/wiki/Mini_private_key_format
 * https://en.bitcoin.it/wiki/Talk:Mini_private_key_format
@@ -36,33 +42,6 @@ References:
 * Date field: 50 years, 1 week: 50*365/7 = 2607. 11 bits: 2048 => 39 years. Good enough for me. 19 years 2^10 still good enough.
   * 10 bits date field
 * root_key: 128, 192, 256 bit.
-* 
-
-
-Some rules for generation:
-
-Parameters:
-* 128 bits of security
-* 8 bit checksum has to be zero
-*   1_000 rounds for checksum evaluation
-* 100_000 rounds to generate the final seed
-* starting seed is "bitcoin key derivation"
-
-* creating a valid key: 100*1024 evaluations required on average.
-
-
-repeat
-	generate 128 bits of randomness (16 bytes)
-	calculate 256 x HMAC_SHA512
-until 256'th seed starts with 8 bits of zero. (requires 65536 HMAC-SHA512 steps on average)
-The seed is the 255th iteration.
-
-Represent the 128bits in 8 5-letter words as described in https://arxiv.org/html/0901.4016
-
-* generate 8 words
-* each word has 5 letters: cvcvc
-* c is element from "BDFGHJKLMNPRSTVZ"
-* v is element from "AIOU"
 
 * concatenate all 8 words into a single string, e.g. "MIDIMSILODHORAHROBOSRAZOJVONUJRUTADRAPOB"
 * calculate SHA256 for password concatenated with "?", e.g. "MIDIMSILODHORAHROBOSRAZOJVONUJRUTADRAPOB?"
@@ -94,6 +73,13 @@ Rules for decoding:
 =end
 
 require "securerandom"
+
+class Crypt
+	def self.hash(data)
+		Digest::SHA512.digest(data)
+	end
+end
+	
 
 class ProquintsEncoder
 	class ProquintsEncoderError < ::StandardError; end
@@ -299,7 +285,7 @@ class BinaryEncoder
 	
 	# encodes all shares into a save binary representation
 	def self.encode(secret, num_shares_needed, shares)
-		checksum_secret = Digest::SHA512.digest(secret)[0].unpack("C")[0]
+		checksum_secret = Crypt::hash(secret)[0].unpack("C")[0]
 		
 		version = 0
 		shares.map do |x, bytes|
@@ -307,7 +293,7 @@ class BinaryEncoder
 			buf = pack(version, x, [0,0], 0, 0, bytes)
 			
 			# interleave with checksum
-			checksum_share = Digest::SHA512.digest(buf)[0...2].unpack("C*")
+			checksum_share = Crypt::hash(buf)[0...2].unpack("C*")
 			pack(version, x, checksum_share, num_shares_needed, checksum_secret, bytes)
 		end
 	end
@@ -322,7 +308,7 @@ class BinaryEncoder
 			
 			# calculate original checksum
 			buf = pack(version, x, [0,0], 0, 0, bytes)
-			checksum_share = Digest::SHA512.digest(buf)[0...2].unpack("C*")
+			checksum_share = Crypt::hash(buf)[0...2].unpack("C*")
 			
 			# xor here
 			num_shares_needed = 1 + ((checksum_share[0] ^ a) & 0x3)
@@ -371,7 +357,7 @@ class CompactMnemonic
 		decoded_secret = GF256::join(shares[:shares])
 		
 		# checksum
-		checksum_decoded_secret = Digest::SHA512.digest(decoded_secret)[0].unpack("C")[0]
+		checksum_decoded_secret = Crypt::hash(decoded_secret)[0].unpack("C")[0]
 		raise ChecksumError, "checksum error!" unless checksum_decoded_secret == shares[:checksum_secret]
 		decoded_secret
 	end	
@@ -394,7 +380,7 @@ end
 
 def modify(share)
 	share = share.gsub(" ", "")
-	pos = rand(share.size)
+	pos = rand(share.size-1)+1
 		
 	letters = ProquintsEncoder::CONSONANTS 
 	letters = ProquintsEncoder::VOVELS if 1 == ((pos%5)%2)
@@ -414,14 +400,16 @@ num_collisions = 0
 num_err_checksum = 0
 num_err_version = 0
 num_err_final_checksum = 0
+num_total_runs = 0
 
-num_runs = 0
+secret = SecureRandom.random_bytes(128/8)
+shares = CompactMnemonic::encode(2, 3, secret)
+puts shares[0].gsub(" ", "").upcase
+modified_share0 = shares[0]
 loop do
-	secret = SecureRandom.random_bytes(128/8)
-	shares = CompactMnemonic::encode(2, 3, secret)
-	
-	modified_share0 = modify(shares[0])
+	modified_share0 = modify(modified_share0)
 	begin
+		#pp [modified_share0, shares[1]]
 		decoded = CompactMnemonic::decode([modified_share0, shares[1]])
 		num_collisions += 1
 		
@@ -430,6 +418,7 @@ loop do
 		puts "num_err_version: #{num_err_version}"
 		puts "num_err_final_checksum: #{num_err_final_checksum}"
 		puts "num_collisions: #{num_collisions}"
+		puts "num_total_runs: #{num_total_runs}"
 
 		puts "share = #{shares[0].gsub(" ", "")}"
 		puts "modif = #{modified_share0}"
@@ -445,12 +434,12 @@ loop do
 		num_err_final_checksum += 1
 	end
 	
-	num_runs += 1
-	if num_runs % 10000 == 0
+	num_total_runs += 1
+	if num_total_runs % 10000 == 0
 		if num_collisions != 0
-			puts "1/#{num_runs / num_collisions}"
+			puts "1/#{num_total_runs / num_collisions}"
 		else
-			puts num_runs
+			puts num_total_runs
 		end
 	end
 end
