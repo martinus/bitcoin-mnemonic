@@ -130,17 +130,3 @@ class GF256
 	end	
 end
 
-=begin
-shares = nil
-t = Time.now
-10000.times do 
-	shares = GF256::split(3, 10, "yayasdfase")
-end
-puts Time.now - t
-pp shares
-
-secret = GF256::join([shares[0], shares[7], shares[2]])
-pp secret
-=end
-
-#p [1,2, "asdf\x00a"].pack("CCa*")

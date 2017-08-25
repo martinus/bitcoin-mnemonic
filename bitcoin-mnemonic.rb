@@ -1,83 +1,9 @@
-require "pp"
-
-
 # Mnemonic code for generating deterministic keys 
 # 
 # Why?
 # * Get rid of a wordlist, be more language agnostic => improved portability
 # * 4 version bits encoded as the last 5 bits of the words. This is version 0. Therefore, the first letter encodes the version.
 # * Checksum is independent from wordlist.
-
-require "securerandom"
-require "openssl"
-require "base64"
-
-
-class ProquintsEncoder
-	class ProquintsEncoderError < ::StandardError; end
-	
-	# 2 bits
-	VOVELS = "aiou"
-
-	# 4 bits
-	CONSONANTS = "bdfghjklmnprstvz"
-
-	# Converts a byte stream into readable string.
-	# Based on "A Proposal for Proquints: Identifiers that are Readable, Spellable, and Pronounceable"
-	# See https://arxiv.org/html/0901.4016
-	def self.encode(blob)
-		raise ProquintsEncoderError, "blob size needs to be even number (multiple of 16 bit)" unless blob.size.even?
-
-		# unpack as 16-bit unsigned, network (big-endian) byte order	
-		words = blob.unpack("n*").map do |n|
-			word = ""
-			word += CONSONANTS[(n >> 12) & 0b1111]
-			word += VOVELS[(n >> 10) & 0b11]
-			word += CONSONANTS[(n >> 6) & 0b1111]
-			word += VOVELS[(n >> 4) & 0b11]
-			word += CONSONANTS[(n >> 0) & 0b1111]
-			word		
-		end
-		
-		words.join(" ")
-	end
-
-	def self.decode(text)
-		# all non-letters are removed
-		stripped = text.gsub(/[^a-zA-Z]/, "")
-		
-		# split into words
-		words = stripped.downcase.scan(/.{5}/)
-		
-		word_nums = words.map do |w|
-			n = 0
-			n |= CONSONANTS.index(w[0]) << 12
-			n |= VOVELS.index(w[1]) << 10
-			n |= CONSONANTS.index(w[2]) << 6
-			n |= VOVELS.index(w[3]) << 4
-			n |= CONSONANTS.index(w[4])
-			n
-		end
-		
-		word_nums.pack("n*")
-	end
-end
-
-
-=begin
-version = 0
-bits_encoding = 9*16 # 9 to 32 words (144 to 512 bits)
-iteration_bits = 0 # 0 to 7, in steps of 1
-passphrase = "my secret" # defaults to empty
-
-
-# find an entrophy for the given settings. Does not need a password.
-e = find_entrophy(version, bits_encoding, iteration_bits)
-puts "entrophy:\n\t#{Base64.strict_encode64(e)}"
-puts "mnemonic:\n\t#{to_text(e)}"
-puts "seed:\n\t#{Base64.strict_encode64(to_seed(to_text(e), passphrase))}"
-puts "bits of security:\n\t#{bits_of_security(bits_encoding, iteration_bits)}"
-=end
 
 =begin
 References:
@@ -167,121 +93,189 @@ Rules for decoding:
 
 =end
 
+require "securerandom"
 
-
-=begin
-vovels = "AIOU".split("")
-consonants = "BDFGHJKLMNPRSTVZ".split("")
-sha = Digest::SHA2.new(256)
-
-begin
-    pwd = ""
-    s = 1
-    9.times do |w|
-        5.times do |l|
-            if (0 == (l % 2))
-                pwd += consonants.sample; s *= consonants.size
-            else
-                pwd += vovels.sample; s *= vovels.size
-            end
-        end
-    end    
-    sha.reset
-    sha.update "#{pwd}?"
-    hex = sha.hexdigest
-end while !hex.start_with?("00")
-
-
-digest = OpenSSL::Digest.new('sha512')
-p digest
-
-key = "Compact Mnemonic"
-p OpenSSL::HMAC.hexdigest(digest, key, pwd)
-
-
-
-
-less = "less"
-f = (2**128*256)/(s.to_f)
-if (f < 1)
-    less = "more"
-    f = 1/f
-end
-
-def pretty(pwd)
-    pwd = pwd.downcase.scan(/.{5}/)
-    str = "\t"
-    pwd.size.times do |i|
-        str += pwd[i]
-        if i.even?
-            str += " "
-        else
-            str += " "
-        end
-    end
-    str
-end
-
-def decode(pwd)
-    pwd = pwd.gsub(/[^a-zA-Z]/, "").upcase
-    hex = Digest::SHA2.hexdigest("#{pwd}?")
-	print "\tchecksum: #{hex[0...2]} "
-    if !hex.start_with?("00")
-        puts "NOT ok :("
-    else 
-        puts "OK :)"
-    end
+class ProquintsEncoder
+	class ProquintsEncoderError < ::StandardError; end
 	
+	# 2 bits
+	VOVELS = "aiou"
+
+	# 4 bits
+	CONSONANTS = "bdfghjklmnprstvz"
+
+	# Converts a byte stream into readable string.
+	# Based on "A Proposal for Proquints: Identifiers that are Readable, Spellable, and Pronounceable"
+	# See https://arxiv.org/html/0901.4016
+	def self.encode(blob)
+		raise ProquintsEncoderError, "blob size needs to be even number (multiple of 16 bit)" unless blob.size.even?
+
+		# unpack as 16-bit unsigned, network (big-endian) byte order	
+		words = blob.unpack("n*").map do |n|
+			word = ""
+			word += CONSONANTS[(n >> 12) & 0b1111]
+			word += VOVELS[(n >> 10) & 0b11]
+			word += CONSONANTS[(n >> 6) & 0b1111]
+			word += VOVELS[(n >> 4) & 0b11]
+			word += CONSONANTS[(n >> 0) & 0b1111]
+			word		
+		end
+		
+		words.join(" ")
+	end
+
+	def self.decode(text)
+		# all non-letters are removed
+		stripped = text.gsub(/[^a-zA-Z]/, "")
+		
+		# split into words
+		words = stripped.downcase.scan(/.{5}/)
+		
+		word_nums = words.map do |w|
+			n = 0
+			n |= CONSONANTS.index(w[0]) << 12
+			n |= VOVELS.index(w[1]) << 10
+			n |= CONSONANTS.index(w[2]) << 6
+			n |= VOVELS.index(w[3]) << 4
+			n |= CONSONANTS.index(w[4])
+			n
+		end
+		
+		word_nums.pack("n*")
+	end
 end
 
-puts "compact mnemonic:"
-puts pretty(pwd)
-puts "QR code:"
-puts "\thttps://chart.googleapis.com/chart?chs=250x250&cht=qr&chl=#{pwd}"
-puts
-puts "BIP 39 example:"
-puts "\ticon shallow bar topic chest foster soap walnut judge junk anger glove"
-puts
-puts "SHA256:"
-puts "\t#{Digest::SHA2.hexdigest(pwd)}"
-puts
-puts "#{Math.log(s/256)/Math.log(2)} bits of security (#{f} times #{less} secure than 2^128)"
-puts
-decode(pretty(pwd))
 
+# This is a straight ruby port of Coda Hale's https://github.com/codahale/shamir
+# A bit simplified.
+# https://github.com/codahale/shamir/blob/master/src/main/java/com/codahale/shamir/GF256.java
 
-Let 
-* n denote the number of entropy bits of the seed, and
-* m the number of bits of difficulty added by key stretching: m = log2(stretching_iterations). Let 
-* k denote the length of the prefix, in bits.
+class GF256
+	LOG = [
+		"ff00190132021ac64bc71b6833eedf036404e00e348d81ef4c7108c8f8691cc1" +
+		"7dc21db5f9b9276a4de4a6729ac90978652f8a05210fe12412f082453593da8e" +
+		"968fdbbd36d0ce94135cd2f14046833866ddfd30bf068b62b325e29822889110" +
+		"7e6e48c3a3b61e423a6b2854fa853dba2b790a159b9f5eca4ed4ace5f373a757" +
+		"af58a850f4ead6744faee9d5e7e6ade82cd7757aeb160bf559cb5fb09ca951a0" +
+		"7f0cf66f17c449ecd8431f2da4767bb7ccbb3e5afb60b1863b52a16caa55299d" +
+		"97b2879061bedcfcbc95cfcd373f5bd15339843c41a26d47142a9e5d56f2d3ab" +
+		"441192d923202e89b47cb8267799e3a5674aeddec531fe180d638c80c0f77007" ].pack("H*").unpack("C*")
+	EXP = [
+		"0103050f113355ff1a2e7296a1f813355fe13848d87395a4f702060a1e2266aa" +
+		"e5345ce43759eb266abed97090abe63153f5040c143c44cc4fd168b8d36eb2cd" +
+		"4cd467a9e03b4dd762a6f10818287888839eb9d06bbddc7f8198b3ce49db769a" +
+		"b5c457f9103050f00b1d2769bbd661a3fe192b7d8792adec2f7193aee92060a0" +
+		"fb163a4ed26db7c25de73256fa153f41c35ee23d47c940c05bed2c749cbfda75" +
+		"9fbad564acef2a7e829dbcdf7a8e89809bb6c158e82365afea256fb1c843c554" +
+		"fc1f2163a5f407091b2d7799b0cb46ca45cf4ade798b8691a8e33e42c651f30e" +
+		"12365aee297b8d8c8f8a8594a7f20d17394bdd7c8497a2fd1c246cb4c752f601" +
+		"03050f113355ff1a2e7296a1f813355fe13848d87395a4f702060a1e2266aae5" +
+		"345ce43759eb266abed97090abe63153f5040c143c44cc4fd168b8d36eb2cd4c" +
+		"d467a9e03b4dd762a6f10818287888839eb9d06bbddc7f8198b3ce49db769ab5" +
+		"c457f9103050f00b1d2769bbd661a3fe192b7d8792adec2f7193aee92060a0fb" +
+		"163a4ed26db7c25de73256fa153f41c35ee23d47c940c05bed2c749cbfda759f" +
+		"bad564acef2a7e829dbcdf7a8e89809bb6c158e82365afea256fb1c843c554fc" +
+		"1f2163a5f407091b2d7799b0cb46ca45cf4ade798b8691a8e33e42c651f30e12" +
+		"365aee297b8d8c8f8a8594a7f20d17394bdd7c8497a2fd1c246cb4c752f60000" ].pack("H*").unpack("C*")
+		
+	def self.add(a, b)
+		a ^ b
+	end
+	
+	def self.sub(a, b)
+		add(a,b)
+	end
+	
+	def self.mul(a, b)
+		return 0 if a == 0 || b == 0
+		EXP[(LOG[a] + LOG[b]) % 255]
+	end
+	
+	def self.div(a, b)
+		# multiply by the inverse of b
+		mul(a, EXP[255 - LOG[b]])
+	end
 
-On each iteration of the attack, the probability to obtain a valid seed is p = 2^-k
+	def self.eval(p, x)
+		# horner's method
+		result = 0
+		(p.length - 1).downto(0) do |i|
+			result = add(mul(result, x), p[i].ord)
+		end
+		result
+	end
+	
+	def self.degree(p)
+		(p.length - 1).downto(0) do |i|
+			return i unless p[i].ord == 0
+		end
+		0
+	end
+	
+	def self.generate(required_degree, x)
+		# generate random polynomials until we find one of the given degree
+		loop do			
+			p = SecureRandom.random_bytes(required_degree + 1)
+			if degree(p) == required_degree
+				# set y intercept
+				p[0] = x
+				return p
+			end
+		end 
+	end
+	
+	def self.interpolate(points)
+		# calculate f(0) of the given points using Lagrangian interpolation
+		x = 0
+		y = 0
+		points.size.times do |i|
+			aX = points[i][0]
+			aY = points[i][1]
+			li = 1
+			points.size.times do |j|
+				bX = points[j][0]
+				if (i != j)
+					li = mul(li, div(sub(x, bX), sub(aX, bX)))
+				end
+			end
+			y = add(y, mul(li, aY))
+		end
+		y
+	end
 
-The number of hashes required to test a candidate seed is: p * (1+2^m) + (1-p)*1 = 1 + 2^(m-k)
+	def self.split(num_shares_needed, num_shares_total, secret)		
+		# generate part values
+		values = Array.new(num_shares_total) { Array.new(secret.length) }
+		secret.length.times do |i|
+			# for each byte, generate a random polynomial, p
+			p = GF256::generate(num_shares_needed - 1, secret[i])			
+			(1..num_shares_total).each do |x|
+				# each part's byte is p(partId)
+				values[x - 1][i] = GF256::eval(p, x)
+			end
+		end
+		
+		shares = []
+		values.each_index do |i|
+			shares.push [i+1, values[i].pack("C*")]
+		end
+		shares
+	end
+	
+	def self.join(parts)
+		length = parts[0][1].length
+		
+		secret = Array.new(length)
+		secret.each_index do |i|
+			points = parts.map do |nr, share|
+				[nr, share[i].ord]
+			end
+			secret[i] = GF256::interpolate(points)
+		end
+		secret.pack("C*")
+	end	
+end
 
-Therefore, the cost of an attack is: 2^n * (1 + 2^(m-k))
-
-This can be approximated as 2^(n + m - k) if m>k and as 2^n otherwise.
-
-With the standard values currently used in Electrum, we obtain: 2^(132 + 11 - 8) = 2^135. This means that a standard Electrum seed is equivalent, in terms of hashes, to 135 bits of entropy.
-
-9 words:
-9*16 + m - 11
-
-2 ^
-
-Next  Previous
-
-
-
-
-=end
-
-
-# from https://github.com/lian/shamir-secret-sharing/blob/master/lib/shamir-secret-sharing.rb
-# stripped down to the bare minimum
-require 'digest/sha1'
-require './GF256.rb'
 
 class BinaryEncoder
 	class ShareChecksumError < ::StandardError; end
@@ -358,6 +352,7 @@ class BinaryEncoder
 	end
 end
 
+
 class CompactMnemonic
 	class ChecksumError < ::StandardError; end
 
@@ -415,8 +410,6 @@ end
 
 require "pp"
 
-#secret = SecureRandom.random_bytes(128 / 8)
-
 num_collisions = 0
 num_err_checksum = 0
 num_err_version = 0
@@ -424,7 +417,7 @@ num_err_final_checksum = 0
 
 num_runs = 0
 loop do
-	secret = "Hello, World !"
+	secret = SecureRandom.random_bytes(128/8)
 	shares = CompactMnemonic::encode(2, 3, secret)
 	
 	modified_share0 = modify(shares[0])
@@ -432,8 +425,17 @@ loop do
 		decoded = CompactMnemonic::decode([modified_share0, shares[1]])
 		num_collisions += 1
 		
-		puts "secret = #{secret.unpack("H*")}"
-		puts "collis = #{decoded.unpack("H*")}"
+		puts
+		puts "num_err_checksum: #{num_err_checksum}"
+		puts "num_err_version: #{num_err_version}"
+		puts "num_err_final_checksum: #{num_err_final_checksum}"
+		puts "num_collisions: #{num_collisions}"
+
+		puts "share = #{shares[0].gsub(" ", "")}"
+		puts "modif = #{modified_share0}"
+		puts "        #{diff(shares[0].gsub(" ", ""), modified_share0)}"
+		puts "secret = #{secret.unpack("H*")[0]}"
+		puts "collis = #{decoded.unpack("H*")[0]}"
 		puts "         #{diff(secret.unpack("H*")[0], decoded.unpack("H*")[0])}"
 	rescue BinaryEncoder::ShareChecksumError => e
 		num_err_checksum += 1
@@ -445,195 +447,10 @@ loop do
 	
 	num_runs += 1
 	if num_runs % 10000 == 0
-		print "."
-		STDOUT.flush
-	end
-end
-
-
-=begin
-	def self.combine(shares)
-		return false if shares.size < 2
-		shares = unpack(shares)
-		num_bytes = shares[0][1]
-		prime = smallest_prime_of_bytelength(num_bytes)
-
-		secret = shares.inject(OpenSSL::BN.new("0")){|secret,(x,num_bytes,y)|
-			l_x = l(x, shares, prime)
-			summand = OpenSSL::BN.new(y.to_s).mod_mul(l_x, prime)
-			secret = (secret + summand) % prime
-		}
-		secret = [ secret.to_s(16).rjust(num_bytes*2, '0') ].pack("H*")
-		
-		# compare checksum
-		raise ShareDecodeError, "secret checksum does not match!" unless Digest::SHA512.digest(secret)[0].ord == shares[0][4]
-		secret
-	end
-
-	
-	def self.unpack(shares)
-		
-		result = shares.map{|i|
-			blob = from_text(i)
-
-			a,b,yHex = blob.unpack("CCH*")
-			version = a>>4
-			x = 1 + ((a >> 2) & 0x3)
-
-			# calculate original checksum
-			checksum_share = [0,0]
-			checksum_secret = [0,0]
-			buf = encode(version, x, [0,0], 0, [0,0], yHex)
-			checksum_share = Digest::SHA512.digest(buf)[0...2].unpack("C*")
-			
-			# xor here
-			needed = 1 + ((checksum_share[0] ^ a) & 0x3)
-			checksum_secret = checksum_share[1] ^ b
-			
-			# puts "needed=#{needed}, checksum_secret=#{checksum_secret.to_s(16)}"
-
-			[x, yHex.size/2, yHex.to_i(16), needed, checksum_secret]
-		}
-		needed = result[0][3]
-		checksum_secret = result[0][4]
-		result.each do |x|
-			raise ShareChecksumError, "needed / checksum do not match" unless (needed == x[3] && checksum_secret == x[4])
-		end
-	end
-end
-
-
-# converts an ID to n-of-m and nr. of the share.
-def find_id_or_nmx(id_or_nmx, max_m=30)
-	return [0, 1, 1, 1] if id_or_nmx == 0 || id_or_nmx == [1,1,1]
-	
-	id = 0
-	max_m.times do |m|
-		m.times do |n|
-			(m+1).times do |nr|
-				nmx = [n+2, m+1, nr+1]
-				return [id] + nmx if id_or_nmx == id || id_or_nmx == nmx
-				id += 1
-			end
-		end
-	end
-	nil
-end
-
-id = 0
-loop do
-	r = find_id_or_nmx(id, 3)
-	break unless r
-	pp [id, r]
-	id += 1
-end
-
-
-def gen_prime_table
-	(16..64).step(2) do |i|
-		n = OpenSSL::BN.new((2**(i*8)).to_s)
-		x = 1
-		loop{ break if (n+x).prime_fasttest?(100); x += 2 }
-		puts "#{i} => OpenSSL::BN.new((2**(8*#{i}) + #{x}).to_s),"
-	end
-end
-
-def gen_prime_table
-	(16..64).step(2) do |i|
-		n = OpenSSL::BN.generate_prime(i*8)
-		puts "#{i} => OpenSSL::BN.new('#{n.to_s(16)}', 16),"
-	end
-end
-
-
-pp find_id_or_nmx(4)
-
-def diff(a, b)
-	str = ""
-	[a.size, b.size].max.times do |i|
-		if a[i] == b[i]
-			str += " "
+		if num_collisions != 0
+			puts "1/#{num_runs / num_collisions}"
 		else
-			str += "^"
-		end
-	end
-	str
-end
-
-def find_collision(needed, available)
-	collisions = 0
-	error_checksum_detected = 0
-	error_decoding_detected = 0
-	type_error = 0
-	
-	loop do
-		entrophy = SecureRandom.random_bytes(128 / 8)
-		shares = ShamirSecretSharing::Packed.split(entrophy, available, needed)
-
-		# modify one random letter
-		s = shares[0].clone
-		s = s.gsub(" ", "")
-
-
-		pos = rand(s.size-1)+1
-		
-		letters = CONSONANTS 
-		letters = VOVELS if 1 == ((pos%5)%2)
-		
-		l = nil
-		begin
-			l = letters[rand(letters.size)]
-		end while l == s[pos]
-		s[pos] = l
-		
-		begin
-			decoded = ShamirSecretSharing::Packed.combine([s, shares[1]])
-			collisions += 1
-			puts
-			puts "errors checksum detected: #{error_checksum_detected}"
-			puts "error decoding detected: #{error_decoding_detected}"
-			puts "error probability: 1/#{(error_decoding_detected+error_checksum_detected)/collisions.to_f}"
-			puts "collisions: #{collisions}"
-			puts "type error: #{type_error}"
-			puts "entrophy = #{entrophy.unpack('H*')[0]}"
-			puts "decoded  = #{decoded.unpack('H*')[0]}"
-			puts "           #{diff(entrophy.unpack('H*')[0], decoded.unpack('H*')[0])}"
-			puts "equal? #{entrophy == decoded}"
-			puts "share = #{shares[0].gsub(" ", "")}"
-			puts "modif = #{s}"
-			puts "        #{diff(s, shares[0].gsub(" ", ""))}"
-		rescue ShamirSecretSharing::ShareChecksumError => e
-			error_checksum_detected += 1
-		rescue ShamirSecretSharing::ShareDecodeError => e
-			error_decoding_detected += 1
-		rescue TypeError => e
-			type_error += 1
-		end
-		
-		if (error_checksum_detected % 10000 == 0)
-			puts "error probability: 1/#{(error_decoding_detected+error_checksum_detected)/collisions.to_f} (#{collisions+error_checksum_detected+error_decoding_detected+type_error} evals)"
-			STDOUT.flush
+			puts num_runs
 		end
 	end
 end
-
-#gen_prime_table
-
-find_collision(2, 3)
-
-# 1/228102.2 2of2
-# 
-
-=begin
-entrophy = SecureRandom.random_bytes(128 / 8)
-puts "entropy=#{entrophy.unpack("H*")}"
-shares = ShamirSecretSharing::Packed.split(entrophy, 3, 2)
-
-
-#shares[1][12]='l'
-pp shares
-decoded = ShamirSecretSharing::Packed.combine(shares[0...2])
-puts "decoded: #{decoded.unpack("H*")}"
-
-=end
-
