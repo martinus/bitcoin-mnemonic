@@ -14,6 +14,8 @@ require "base64"
 
 
 class ProquintsEncoder
+	class ProquintsEncoderError < ::StandardError; end
+	
 	# 2 bits
 	VOVELS = "aiou"
 
@@ -24,6 +26,8 @@ class ProquintsEncoder
 	# Based on "A Proposal for Proquints: Identifiers that are Readable, Spellable, and Pronounceable"
 	# See https://arxiv.org/html/0901.4016
 	def self.encode(blob)
+		raise ProquintsEncoderError, "blob size needs to be even number (multiple of 16 bit)" unless blob.size.even?
+
 		# unpack as 16-bit unsigned, network (big-endian) byte order	
 		words = blob.unpack("n*").map do |n|
 			word = ""
@@ -283,6 +287,7 @@ class BinaryEncoder
 	class ShareChecksumError < ::StandardError; end
 	class ShareDecodeError < ::StandardError; end
 	class ShareSanityCheckError < ::StandardError; end
+	class ShareVersionError < ::StandardError; end
 	
 	# 4 bit: version (currently 0)
 	# 2 bit: x: 1,2,3 or 4.
@@ -302,13 +307,10 @@ class BinaryEncoder
 	def self.encode(secret, num_shares_needed, shares)
 		checksum_secret = Digest::SHA512.digest(secret)[0].unpack("C")[0]
 		
-		num_shares_available = shares.size
-
 		version = 0
 		shares.map do |x, bytes|
 			# calculate original checksum
 			buf = pack(version, x, [0,0], 0, 0, bytes)
-			puts "buf=#{buf.unpack("H*")}"
 			
 			# interleave with checksum
 			checksum_share = Digest::SHA512.digest(buf)[0...2].unpack("C*")
@@ -320,11 +322,12 @@ class BinaryEncoder
 		result = shares.map{|blob|
 			a,b,bytes = blob.unpack("CCa*")
 			version = a>>4
+			raise ShareVersionError, "unknown version #{version}" unless version == 0
+			
 			x = 1 + ((a >> 2) & 0x3)
 			
 			# calculate original checksum
 			buf = pack(version, x, [0,0], 0, 0, bytes)
-			puts "buf=#{buf.unpack("H*")}"
 			checksum_share = Digest::SHA512.digest(buf)[0...2].unpack("C*")
 			
 			# xor here
@@ -340,43 +343,112 @@ class BinaryEncoder
 		result.each do |x, bytes, ns, cs|
 			raise ShareChecksumError, "needed / checksum do not match" unless (num_shares_needed == ns && checksum_secret == cs)
 		end
+	
+		# num required, checksum_secret, and mapping.
+		{
+			:num_required => result[0][2],
+			:checksum_secret => result[0][3],
+			:shares => result.map {|x,bytes| [x,bytes] }
+		}
 	end	
 	
 	def self.decode(shares)
 		return false if shares.size < 2
-		shares = unpack(shares)
-		num_bytes = shares[0][1]
-		
-		# compare checksum
-		raise ShareDecodeError, "secret checksum does not match!" unless Digest::SHA512.digest(secret)[0].ord == shares[0][3]
-		secret	
+		unpack(shares)
 	end
+end
+
+class CompactMnemonic
+	class ChecksumError < ::StandardError; end
+
+	def self.encode(num_shares_needed, num_shares_total, secret)
+		shares = GF256::split(num_shares_needed, num_shares_total, secret)
+		BinaryEncoder::encode(secret, num_shares_needed, shares).map do |blob|
+			ProquintsEncoder::encode(blob)
+		end
+	end
+
+	def self.decode(shares)
+		shares = shares.map do |proquint|
+			ProquintsEncoder::decode(proquint)
+		end
+		shares = BinaryEncoder::decode(shares)
+		decoded_secret = GF256::join(shares[:shares])
+		
+		# checksum
+		checksum_decoded_secret = Digest::SHA512.digest(decoded_secret)[0].unpack("C")[0]
+		raise ChecksumError, "checksum error!" unless checksum_decoded_secret == shares[:checksum_secret]
+		decoded_secret
+	end	
+end
+
+
+
+
+def diff(a, b)
+	str = ""
+	[a.size, b.size].max.times do |i|
+		if a[i] == b[i]
+			str += " "
+		else
+			str += "^"
+		end
+	end
+	str
+end
+
+def modify(share)
+	share = share.gsub(" ", "")
+	pos = rand(share.size)
+		
+	letters = ProquintsEncoder::CONSONANTS 
+	letters = ProquintsEncoder::VOVELS if 1 == ((pos%5)%2)
+		
+	l = nil
+	begin
+		l = letters[rand(letters.size)]
+	end while l == share[pos]
+	share[pos] = l
+	share
 end
 
 
 require "pp"
 
-# configuration
-secret = SecureRandom.random_bytes(128 / 8)
-num_shares_available = 3
-num_shares_needed = 2
+#secret = SecureRandom.random_bytes(128 / 8)
 
-# encode
-s = GF256::split(num_shares_needed, num_shares_available, secret)
-pp s[0][1].size
-s = BinaryEncoder::encode(secret, num_shares_needed, s)
-pp s
-s = s.map { |blob| ProquintsEncoder::encode(blob) }
-pp s
+num_collisions = 0
+num_err_checksum = 0
+num_err_version = 0
+num_err_final_checksum = 0
 
-# decode
-s = s.map { |proquint| ProquintsEncoder::decode(proquint) }
-pp s
-s = BinaryEncoder::decode(s)
-pp s
-s = GF256::join(s)
-pp s
-
+num_runs = 0
+loop do
+	secret = "Hello, World !"
+	shares = CompactMnemonic::encode(2, 3, secret)
+	
+	modified_share0 = modify(shares[0])
+	begin
+		decoded = CompactMnemonic::decode([modified_share0, shares[1]])
+		num_collisions += 1
+		
+		puts "secret = #{secret.unpack("H*")}"
+		puts "collis = #{decoded.unpack("H*")}"
+		puts "         #{diff(secret.unpack("H*")[0], decoded.unpack("H*")[0])}"
+	rescue BinaryEncoder::ShareChecksumError => e
+		num_err_checksum += 1
+	rescue BinaryEncoder::ShareVersionError => e
+		num_err_version += 1
+	rescue CompactMnemonic::ChecksumError => e
+		num_err_final_checksum += 1
+	end
+	
+	num_runs += 1
+	if num_runs % 10000 == 0
+		print "."
+		STDOUT.flush
+	end
+end
 
 
 =begin
