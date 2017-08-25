@@ -74,9 +74,17 @@ Rules for decoding:
 
 require "securerandom"
 
-class Crypt
+class Crypto
 	def self.hash(data)
 		Digest::SHA512.digest(data)
+	end
+	
+	def self.random_bytes(n)
+		SecureRandom.random_bytes(n)
+	end
+	
+	def self.rand(n)
+		SecureRandom.random_number(n)
 	end
 end
 	
@@ -85,10 +93,10 @@ class ProquintsEncoder
 	class ProquintsEncoderError < ::StandardError; end
 	
 	# 2 bits
-	VOVELS = "aiou"
+	VOVELS = "aiou".split("")
 
 	# 4 bits
-	CONSONANTS = "bdfghjklmnprstvz"
+	CONSONANTS = "bdfghjklmnprstvz".split("")
 
 	# Converts a byte stream into readable string.
 	# Based on "A Proposal for Proquints: Identifiers that are Readable, Spellable, and Pronounceable"
@@ -96,18 +104,18 @@ class ProquintsEncoder
 	def self.encode(blob)
 		raise ProquintsEncoderError, "blob size needs to be even number (multiple of 16 bit)" unless blob.size.even?
 
-		# unpack as 16-bit unsigned, network (big-endian) byte order	
-		words = blob.unpack("n*").map do |n|
-			word = ""
-			word += CONSONANTS[(n >> 12) & 0b1111]
-			word += VOVELS[(n >> 10) & 0b11]
-			word += CONSONANTS[(n >> 6) & 0b1111]
-			word += VOVELS[(n >> 4) & 0b11]
-			word += CONSONANTS[(n >> 0) & 0b1111]
-			word		
+		# unpack as 16-bit unsigned, network (big-endian) byte order
+		word = ""
+		blob.unpack("n*").each do |n|
+			word << CONSONANTS[(n >> 12) & 0b1111]
+			word << VOVELS[(n >> 10) & 0b11]
+			word << CONSONANTS[(n >> 6) & 0b1111]
+			word << VOVELS[(n >> 4) & 0b11]
+			word << CONSONANTS[(n >> 0) & 0b1111]
+			word << " "
 		end
 		
-		words.join(" ")
+		word.chomp
 	end
 
 	def self.decode(text)
@@ -193,21 +201,19 @@ class GF256
 	
 	def self.degree(p)
 		(p.length - 1).downto(0) do |i|
-			return i unless p[i].ord == 0
+			return i if p[i].ord != 0
 		end
 		0
 	end
 	
 	def self.generate(required_degree, x)
 		# generate random polynomials until we find one of the given degree
-		loop do			
-			p = SecureRandom.random_bytes(required_degree + 1)
-			if degree(p) == required_degree
-				# set y intercept
-				p[0] = x
-				return p
-			end
-		end 
+		p = Crypto::random_bytes(required_degree + 1)
+		while p[-1].ord == 0
+			p[-1] = Crypto::random_bytes(1)
+		end
+		p[0] = x
+		p
 	end
 	
 	def self.interpolate(points)
@@ -229,7 +235,7 @@ class GF256
 		y
 	end
 
-	def self.split(num_shares_needed, num_shares_total, secret)		
+	def self.split(num_shares_needed, num_shares_total, secret)
 		# generate part values
 		values = Array.new(num_shares_total) { Array.new(secret.length) }
 		secret.length.times do |i|
@@ -285,7 +291,7 @@ class BinaryEncoder
 	
 	# encodes all shares into a save binary representation
 	def self.encode(secret, num_shares_needed, shares)
-		checksum_secret = Crypt::hash(secret)[0].unpack("C")[0]
+		checksum_secret = Crypto::hash(secret)[0].unpack("C")[0]
 		
 		version = 0
 		shares.map do |x, bytes|
@@ -293,7 +299,7 @@ class BinaryEncoder
 			buf = pack(version, x, [0,0], 0, 0, bytes)
 			
 			# interleave with checksum
-			checksum_share = Crypt::hash(buf)[0...2].unpack("C*")
+			checksum_share = Crypto::hash(buf)[0...2].unpack("C*")
 			pack(version, x, checksum_share, num_shares_needed, checksum_secret, bytes)
 		end
 	end
@@ -308,7 +314,7 @@ class BinaryEncoder
 			
 			# calculate original checksum
 			buf = pack(version, x, [0,0], 0, 0, bytes)
-			checksum_share = Crypt::hash(buf)[0...2].unpack("C*")
+			checksum_share = Crypto::hash(buf)[0...2].unpack("C*")
 			
 			# xor here
 			num_shares_needed = 1 + ((checksum_share[0] ^ a) & 0x3)
@@ -339,14 +345,25 @@ class BinaryEncoder
 end
 
 
+TIMER = Hash.new do |h,k| h[k] = 0.0 end
+
 class CompactMnemonic
 	class ChecksumError < ::StandardError; end
 
 	def self.encode(num_shares_needed, num_shares_total, secret)
+		t = Time.now;
 		shares = GF256::split(num_shares_needed, num_shares_total, secret)
-		BinaryEncoder::encode(secret, num_shares_needed, shares).map do |blob|
+		
+		TIMER[:split] += Time.now - t; t = Time.now;
+		enc = BinaryEncoder::encode(secret, num_shares_needed, shares)
+		TIMER[:enc] += Time.now - t; t = Time.now;
+		
+		proquints = enc.map do |blob|
 			ProquintsEncoder::encode(blob)
 		end
+		TIMER[:proquints] += Time.now - t;
+		
+		proquints
 	end
 
 	def self.decode(shares)
@@ -357,7 +374,7 @@ class CompactMnemonic
 		decoded_secret = GF256::join(shares[:shares])
 		
 		# checksum
-		checksum_decoded_secret = Crypt::hash(decoded_secret)[0].unpack("C")[0]
+		checksum_decoded_secret = Crypto::hash(decoded_secret)[0].unpack("C")[0]
 		raise ChecksumError, "checksum error!" unless checksum_decoded_secret == shares[:checksum_secret]
 		decoded_secret
 	end	
@@ -380,14 +397,14 @@ end
 
 def modify(share)
 	share = share.gsub(" ", "")
-	pos = rand(share.size-1)+1
+	pos = Crypto::rand(share.size-1)+1
 		
 	letters = ProquintsEncoder::CONSONANTS 
 	letters = ProquintsEncoder::VOVELS if 1 == ((pos%5)%2)
 		
 	l = nil
 	begin
-		l = letters[rand(letters.size)]
+		l = letters[Crypto::rand(letters.size)]
 	end while l == share[pos]
 	share[pos] = l
 	share
@@ -402,11 +419,15 @@ num_err_version = 0
 num_err_final_checksum = 0
 num_total_runs = 0
 
-secret = SecureRandom.random_bytes(128/8)
-shares = CompactMnemonic::encode(2, 3, secret)
-puts shares[0].gsub(" ", "").upcase
-modified_share0 = shares[0]
+t_start = Time.now
+secret = Crypto::random_bytes(128/8)
+
+
+
 loop do
+	shares = CompactMnemonic::encode(2, 3, secret)
+	modified_share0 = shares[0]
+	
 	modified_share0 = modify(modified_share0)
 	begin
 		#pp [modified_share0, shares[1]]
@@ -436,10 +457,11 @@ loop do
 	
 	num_total_runs += 1
 	if num_total_runs % 10000 == 0
+		pp TIMER
 		if num_collisions != 0
-			puts "1/#{num_total_runs / num_collisions}"
+			puts "1/#{num_total_runs / num_collisions}, #{num_total_runs/(Time.now - t_start)}"
 		else
-			puts num_total_runs
+			puts "#{num_total_runs}, #{num_total_runs/(Time.now - t_start)}"
 		end
 	end
 end
