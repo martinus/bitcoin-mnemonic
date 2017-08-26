@@ -1,5 +1,5 @@
 =begin
-Mnemonic code for generating deterministic keys 
+Mnemonic code for generating deterministic keys. A replacement/alternative to BIP39.
  
 Why?
 * Get rid of a wordlist, be more language agnostic => improved portability, more compact.
@@ -75,8 +75,6 @@ Rules for decoding:
 require "securerandom"
 
 class Crypto
-	RNG = Random.new
-
 	def self.hash(data)
 		Digest::SHA256.digest(data)
 	end
@@ -89,7 +87,39 @@ class Crypto
 		SecureRandom.random_number(n)
 	end
 end
+
+class DummyProfiler
+	def initialize
+		@h = Hash.new {|h,k| h[k] = 0.0 }
+		@last_time = Time.now
+		@last_print = Time.now
+	end
 	
+	def measure(id)
+		t = Time.now
+		@h[id] += t - @last_time
+		if (t - @last_print > 2)
+			print
+			@last_print = t
+		end
+		@last_time = Time.now
+	end
+	
+	def print
+		@h.delete(nil)
+		sum = 0
+		@h.to_a.each do |k,v|
+			sum += v
+		end
+		@h.to_a.sort.each do |key, val|
+			printf "%d%8.1f%%\n", key, val/sum*100
+		end
+		puts
+	end
+end
+
+DP = DummyProfiler.new
+
 # Converts a byte stream into readable string.
 # Based on "A Proposal for Proquints: Identifiers that are Readable, Spellable, and Pronounceable"
 # See https://arxiv.org/html/0901.4016
@@ -184,6 +214,7 @@ class ProquintsEncoder
 	end
 end
 
+require "pp"
 
 # This is a straight ruby port of Coda Hale's https://github.com/codahale/shamir
 # A bit simplified.
@@ -237,8 +268,8 @@ class GF256
 	def self.eval(p, x)
 		# horner's method
 		result = 0
-		(p.length - 1).downto(0) do |i|
-			result = add(mul(result, x), p[i].ord)
+		p.reverse_each do |a|
+			result = add(mul(result, x), a)
 		end
 		result
 	end
@@ -252,9 +283,9 @@ class GF256
 	
 	def self.generate(required_degree, x)
 		# generate random polynomials of the given degree
-		p = Crypto::random_bytes(required_degree + 1)
+		p = Crypto::random_bytes(required_degree).unpack("C*")
 		while p[-1].ord == 0
-			p[-1] = Crypto::random_bytes(1)
+			p[-1] = Crypto::rand(254) + 1
 		end
 		p[0] = x
 		p
@@ -264,11 +295,11 @@ class GF256
 		# calculate f(0) of the given points using Lagrangian interpolation
 		x = 0
 		y = 0
-		points.size.times do |i|
+		points.each_index do |i|
 			aX = points[i][0]
 			aY = points[i][1]
 			li = 1
-			points.size.times do |j|
+			points.each_index do |j|
 				bX = points[j][0]
 				if (i != j)
 					li = mul(li, div(sub(x, bX), sub(aX, bX)))
@@ -282,9 +313,10 @@ class GF256
 	def self.split(num_shares_needed, num_shares_total, secret)
 		# generate part values
 		values = Array.new(num_shares_total) { Array.new(secret.length) }
-		secret.length.times do |i|
+		secret = secret.unpack("C*")
+		secret.each_index do |i|
 			# for each byte, generate a random polynomial, p
-			p = GF256::generate(num_shares_needed - 1, secret[i])			
+			p = GF256::generate(num_shares_needed - 1, secret[i])
 			(1..num_shares_total).each do |x|
 				# each part's byte is p(partId)
 				values[x - 1][i] = GF256::eval(p, x)
@@ -299,16 +331,21 @@ class GF256
 	end
 	
 	def self.join(parts)
+		parts = parts.map do |nr, share|
+			[nr, share.unpack("C*")]
+		end
 		length = parts[0][1].length
+		
 		
 		secret = Array.new(length)
 		secret.each_index do |i|
 			points = parts.map do |nr, share|
-				[nr, share[i].ord]
+				[nr, share[i]]
 			end
 			secret[i] = GF256::interpolate(points)
 		end
-		secret.pack("C*")
+		secret = secret.pack("C*")
+		secret
 	end	
 end
 
@@ -416,16 +453,16 @@ class CompactMnemonic
 end
 
 
-
-# some 
 if __FILE__ == $0
 	require 'minitest/autorun'
 	require 'minitest/benchmark'
+	require 'pp'
 	
 	class TestEncodeDecode < Minitest::Test
 		def test_encode_decode
 			secret = Crypto::random_bytes(128/8)
-			shares = CompactMnemonic::encode(2, 3, secret)
+			shares = CompactMnemonic::encode(2, 2, secret)
+			pp shares
 			decoded = CompactMnemonic::decode(shares[0..1])
 			
 			assert_equal secret, decoded
