@@ -490,7 +490,7 @@ if __FILE__ == $0
 	
 
 
-	def diff(a, b)
+	def show_diff(a, b)
 		str = ""
 		[a.size, b.size].max.times do |i|
 			if a[i] == b[i]
@@ -548,10 +548,10 @@ if __FILE__ == $0
 
 					puts "share = #{shares[0].gsub(" ", "")}"
 					puts "modif = #{modified_share0}"
-					puts "        #{diff(shares[0].gsub(" ", ""), modified_share0)}"
+					puts "        #{show_diff(shares[0].gsub(" ", ""), modified_share0)}"
 					puts "secret = #{secret.unpack("H*")[0]}"
 					puts "collis = #{decoded.unpack("H*")[0]}"
-					puts "         #{diff(secret.unpack("H*")[0], decoded.unpack("H*")[0])}"
+					puts "         #{show_diff(secret.unpack("H*")[0], decoded.unpack("H*")[0])}"
 				rescue BinaryEncoder::ShareChecksumError => e
 					num_err_checksum += 1
 				rescue BinaryEncoder::ShareVersionError => e
